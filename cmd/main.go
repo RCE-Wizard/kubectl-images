@@ -5,8 +5,7 @@ import (
 	"os"
 	"regexp"
 
-	kubeimages "https://github.com/RCE-Wizard/kubectl-images"
-
+	kubeimages "github.com/RCE-Wizard/kubectl-images"
 	"github.com/spf13/cobra"
 )
 
