@@ -1,4 +1,4 @@
-module github.com/chenjiandongx/kubectl-images
+module github.com/RCE-Wizard/kubectl-images
 
 go 1.18
 
