@@ -25,6 +25,7 @@ const (
 	labelImage           = "Image"
 	labelImagePullPolicy = "ImagePullPolicy"
 	labelImageSize       = "ImageSize"
+	labelImageDigest     = "ImageDigest"
 )
 
 type Parameters struct {
@@ -36,7 +37,7 @@ type Parameters struct {
 	Unique       bool
 }
 
-// KubeImage is the representation of a container image used in the cluster.
+// NewKubeImage creates a new KubeImage instance.
 type KubeImage struct {
 	entities     []*ImageEntity
 	columns      []string
@@ -65,6 +66,8 @@ func NewKubeImage(regx *regexp.Regexp, params Parameters) *KubeImage {
 		case "5":
 			names = append(names, labelImageSize)
 			needNodeInfo = true
+		case "6":
+			names = append(names, labelImageDigest)
 		}
 	}
 
@@ -85,6 +88,7 @@ type ImageEntity struct {
 	Image           string `json:"image,omitempty" yaml:"image,omitempty"`
 	ImagePullPolicy string `json:"imagePullPolicy,omitempty" yaml:"imagePullPolicy,omitempty"`
 	ImageSize       string `json:"imageSize,omitempty" yaml:"imageSize,omitempty"`
+	ImageDigest     string `json:"imageDigest,omitempty" yaml:"imageDigest,omitempty"`
 }
 
 func (ie *ImageEntity) selectBy(columns []string) []string {
@@ -103,6 +107,8 @@ func (ie *ImageEntity) selectBy(columns []string) []string {
 			result = append(result, ie.ImagePullPolicy)
 		case labelImageSize:
 			result = append(result, ie.ImageSize)
+		case labelImageDigest:
+			result = append(result, ie.ImageDigest)
 		}
 	}
 	return result
@@ -124,6 +130,8 @@ func (ie *ImageEntity) filterBy(columns []string) ImageEntity {
 			entity.ImagePullPolicy = ie.ImagePullPolicy
 		case labelImageSize:
 			entity.ImageSize = ie.ImageSize
+		case labelImageDigest:
+			entity.ImageDigest = ie.ImageDigest
 		}
 	}
 	return entity
@@ -243,6 +251,14 @@ func (ki *KubeImage) execNodeCommand() {
 	}
 }
 
+func (ki *KubeImage) getImageDigest(image string) string {
+	out, err := exec.Command("crane", "digest", image).CombinedOutput()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
 func (ki *KubeImage) execPodCommand() {
 	process := exec.Command("kubectl", ki.podCommands()...)
 	bs, err := process.CombinedOutput()
@@ -270,6 +286,7 @@ func (ki *KubeImage) execPodCommand() {
 			entity.Image = items[3]
 			entity.ImagePullPolicy = items[4]
 		}
+		entity.ImageDigest = ki.getImageDigest(entity.Image)
 		entities = append(entities, entity)
 	}
 
@@ -278,14 +295,7 @@ func (ki *KubeImage) execPodCommand() {
 			entities[i].Namespace = entities[i-1].Namespace
 			entities[i].Pod = entities[i-1].Pod
 		}
-	}
-
-	for i := 0; i < len(entities); i++ {
-		if ki.regx == nil {
-			ki.entities = append(ki.entities, entities[i])
-			continue
-		}
-		if ki.regx.Match([]byte(entities[i].Pod)) {
+		if ki.regx == nil || ki.regx.Match([]byte(entities[i].Pod)) {
 			ki.entities = append(ki.entities, entities[i])
 		}
 	}
@@ -316,12 +326,11 @@ func (ki *KubeImage) summary() {
 	podCnt := NewCounter()
 	imageCnt := NewCounter()
 	containerCnt := 0
-
-	for i := 0; i < len(ki.entities); i++ {
-		namespaceCnt.add(ki.entities[i].Namespace)
-		podCnt.add(ki.entities[i].Pod)
-		imageCnt.add(ki.entities[i].Image)
-		containerCnt += 1
+	for _, entity := range ki.entities {
+		namespaceCnt.add(entity.Namespace)
+		podCnt.add(entity.Pod)
+		imageCnt.add(entity.Image)
+		containerCnt++
 	}
 
 	fmt.Fprintf(os.Stdout, "[Summary]: %d namespaces, %d pods, %d containers and %d different images\n",
@@ -348,8 +357,7 @@ func (ki *KubeImage) getGroupByEntities() [][]string {
 	dst := make([][]string, 0)
 	for _, entity := range ki.groupBy() {
 		line := strings.Join(entity.selectBy(ki.columns), "||")
-		_, ok := set[line]
-		if !ok {
+		if _, ok := set[line]; !ok {
 			set[line] = struct{}{}
 			dst = append(dst, strings.Split(line, "||"))
 		}
